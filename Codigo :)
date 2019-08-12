@@ -1,0 +1,309 @@
+
+#ifndef MPU6050_TOCKN_H
+#define MPU6050_TOCKN_H
+
+#include "Arduino.h"
+#include "Wire.h"
+
+#define MPU6050_ADDR         0x68
+#define MPU6050_SMPLRT_DIV   0x19
+#define MPU6050_CONFIG       0x1a
+#define MPU6050_GYRO_CONFIG  0x1b
+#define MPU6050_ACCEL_CONFIG 0x1c
+#define MPU6050_WHO_AM_I     0x75
+#define MPU6050_PWR_MGMT_1   0x6b
+#define MPU6050_TEMP_H       0x41
+#define MPU6050_TEMP_L       0x42
+
+class MPU6050{
+  public:
+
+  MPU6050(TwoWire &w);
+  MPU6050(TwoWire &w, float aC, float gC);
+
+  void begin();
+
+  void setGyroOffsets(float x, float y, float z);
+
+  void writeMPU6050(byte reg, byte data);
+  byte readMPU6050(byte reg);
+
+  int16_t getRawAccX(){ return rawAccX; };
+  int16_t getRawAccY(){ return rawAccY; };
+  int16_t getRawAccZ(){ return rawAccZ; };
+
+  int16_t getRawTemp(){ return rawTemp; };
+
+  int16_t getRawGyroX(){ return rawGyroX; };
+  int16_t getRawGyroY(){ return rawGyroY; };
+  int16_t getRawGyroZ(){ return rawGyroZ; };
+
+  float getTemp(){ return temp; };
+
+  float getAccX(){ return accX; };
+  float getAccY(){ return accY; };
+  float getAccZ(){ return accZ; };
+
+  float getGyroX(){ return gyroX; };
+  float getGyroY(){ return gyroY; };
+  float getGyroZ(){ return gyroZ; };
+
+  void calcGyroOffsets(bool console = false, uint16_t delayBefore = 1000, uint16_t delayAfter = 3000);
+
+  float getGyroXoffset(){ return gyroXoffset; };
+  float getGyroYoffset(){ return gyroYoffset; };
+  float getGyroZoffset(){ return gyroZoffset; };
+
+
+
+ // float   Initial_A_X_Average, Initial_A_Y_Average, Initial_A_Z_Average;
+  //float A_X_Offset,A_Y_Offset,A_Z_Offset;
+
+  void update();
+
+  float getAccAngleX(){ return angleAccX; };
+  float getAccAngleY(){ return angleAccY; };
+
+  float getGyroAngleX(){ return angleGyroX; };
+  float getGyroAngleY(){ return angleGyroY; };
+  float getGyroAngleZ(){ return angleGyroZ; };
+
+  float getAngleX(){ return angleX; };
+  float getAngleY(){ return angleY; };
+  float getAngleZ(){ return angleZ; };
+  float getV_X(){return V_X;};
+  float getV_Y(){return V_Y;};
+  float getV_Z(){return V_Z;};
+  float getP_X(){return P_X;};
+  float getP_Y(){return P_Y;};
+  float getP_Z(){return P_Z;};
+  private:
+
+  TwoWire *wire;
+
+  int16_t rawAccX, rawAccY, rawAccZ, rawTemp,
+  rawGyroX, rawGyroY, rawGyroZ;
+
+  float gyroXoffset, gyroYoffset, gyroZoffset;
+
+  float temp, accX, accY, accZ, gyroX, gyroY, gyroZ;
+
+  float angleGyroX, angleGyroY, angleGyroZ,
+  angleAccX, angleAccY, angleAccZ;
+
+  float angleX, angleY, angleZ;
+  
+  float P_X, P_Y, P_Z;
+  
+  float V_X, V_Y, V_Z;
+
+  float interval;
+  long preInterval;
+
+  float accCoef, gyroCoef;
+
+  float   Initial_A_X_Average, Initial_A_Y_Average, Initial_A_Z_Average;
+  float A_X_Offset,A_Y_Offset,A_Z_Offset;
+  
+};
+
+#endif
+MPU6050::MPU6050(TwoWire &w){
+  wire = &w;
+  accCoef = 0.02f;
+  gyroCoef = 0.98f;
+}
+
+MPU6050::MPU6050(TwoWire &w, float aC, float gC){
+  wire = &w;
+  accCoef = aC;
+  gyroCoef = gC;
+}
+
+void MPU6050::begin(){
+  writeMPU6050(MPU6050_SMPLRT_DIV, 0x00);
+  writeMPU6050(MPU6050_CONFIG, 0x00);
+  writeMPU6050(MPU6050_GYRO_CONFIG, 0x08);
+  writeMPU6050(MPU6050_ACCEL_CONFIG, 0x00);
+  writeMPU6050(MPU6050_PWR_MGMT_1, 0x01);
+  this->update();
+  angleGyroX = 0;
+  angleGyroY = 0;
+  angleX = this->getAccAngleX();
+  angleY = this->getAccAngleY();
+  preInterval = millis();
+}
+
+void MPU6050::writeMPU6050(byte reg, byte data){
+  wire->beginTransmission(MPU6050_ADDR);
+  wire->write(reg);
+  wire->write(data);
+  wire->endTransmission();
+}
+
+byte MPU6050::readMPU6050(byte reg) {
+  wire->beginTransmission(MPU6050_ADDR);
+  wire->write(reg);
+  wire->endTransmission(true);
+  wire->requestFrom(MPU6050_ADDR, 1);
+  byte data =  wire->read();
+  return data;
+}
+
+void MPU6050::setGyroOffsets(float x, float y, float z){
+  gyroXoffset = x;
+  gyroYoffset = y;
+  gyroZoffset = z;
+}
+
+void MPU6050::calcGyroOffsets(bool console, uint16_t delayBefore, uint16_t delayAfter){
+  float x = 0, y = 0, z = 0;
+  int16_t rx, ry, rz;
+  
+
+
+  delay(delayBefore);
+  if(console){
+    Serial.println();
+    Serial.println("========================================");
+    Serial.println("Calculating gyro offsets");
+    Serial.print("DO NOT MOVE MPU6050");
+  }
+  for(int i = 0; i < 3000; i++){
+    if(console && i % 1000 == 0){
+      Serial.print(".");
+    }
+    wire->beginTransmission(MPU6050_ADDR);
+    wire->write(0x43);
+    wire->endTransmission(false);
+    wire->requestFrom((int)MPU6050_ADDR, 6);
+
+    rx = wire->read() << 8 | wire->read();
+    ry = wire->read() << 8 | wire->read();
+    rz = wire->read() << 8 | wire->read();
+    
+
+    x += ((float)rx) / 65.5;
+    y += ((float)ry) / 65.5;
+    z += ((float)rz) / 65.5;
+    Initial_A_X_Average += rawAccX ;
+    Initial_A_Y_Average += rawAccY ;
+    Initial_A_Z_Average += rawAccZ ;
+  
+    
+  }
+  gyroXoffset = x / 3000;
+  gyroYoffset = y / 3000;
+  gyroZoffset = z / 3000;
+   A_X_Offset= Initial_A_X_Average/3000 ;
+   A_Y_Offset= Initial_A_Y_Average/3000 ;
+   A_Z_Offset= Initial_A_Z_Average /3000 ;
+  
+  if(console){
+    Serial.println();
+    Serial.println("Done!");
+    Serial.print("X : ");Serial.println(gyroXoffset);
+    Serial.print("Y : ");Serial.println(gyroYoffset);
+    Serial.print("Z : ");Serial.println(gyroZoffset);
+    Serial.print("A_X : ");Serial.println(A_X_Offset);
+    Serial.print("A_Y : ");Serial.println(A_Y_Offset);
+    Serial.print("A_Z : ");Serial.println(A_Z_Offset);
+    Serial.println("Program will start after 3 seconds");
+    Serial.print("========================================");
+    delay(delayAfter);
+  }
+}
+
+void MPU6050::update(){
+  wire->beginTransmission(MPU6050_ADDR);
+  wire->write(0x3B);
+  wire->endTransmission(false);
+  wire->requestFrom((int)MPU6050_ADDR, 14);
+
+  rawAccX = wire->read() << 8 | wire->read();
+  rawAccY = wire->read() << 8 | wire->read();
+  rawAccZ = wire->read() << 8 | wire->read();
+  rawTemp = wire->read() << 8 | wire->read();
+  rawGyroX = wire->read() << 8 | wire->read();
+  rawGyroY = wire->read() << 8 | wire->read();
+  rawGyroZ = wire->read() << 8 | wire->read();
+
+  temp = (rawTemp + 12412.0) / 340.0;
+
+  accX = (((float)rawAccX)- A_X_Offset)*9.8 / 16384.0;
+  accY = (((float)rawAccY)- A_Y_Offset)*9.8 / 16384.0;
+  accZ = (((float)rawAccZ)- A_Z_Offset)*9.8 / 16384.0;
+
+  angleAccX = atan2(accY, sqrt(accZ * accZ + accX * accX)) * 360 / 2.0 / PI;
+  angleAccY = atan2(accX, sqrt(accZ * accZ + accY * accY)) * 360 / -2.0 / PI;
+
+  gyroX = ((float)rawGyroX) / 65.5;
+  gyroY = ((float)rawGyroY) / 65.5;
+  gyroZ = ((float)rawGyroZ) / 65.5;
+
+  gyroX -= gyroXoffset;
+  gyroY -= gyroYoffset;
+  gyroZ -= gyroZoffset;
+
+  interval = (millis() - preInterval) * 0.001;
+
+  angleGyroX += gyroX * interval;
+  angleGyroY += gyroY * interval;
+  angleGyroZ += gyroZ * interval;
+
+  V_X += accX * interval;
+  V_Y += accY * interval;
+  V_Z += accZ * interval;
+
+  
+  P_X += V_X * interval;
+  P_Y += V_Y * interval;
+  P_Z += V_Z * interval;
+  
+  angleX = (gyroCoef * (angleX + gyroX * interval)) + (accCoef * angleAccX);
+  angleY = (gyroCoef * (angleY + gyroY * interval)) + (accCoef * angleAccY);
+  angleZ = angleGyroZ;
+
+  preInterval = millis();
+
+}
+
+MPU6050 mpu6050(Wire);
+
+long timer = 0;
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  mpu6050.begin();
+  mpu6050.calcGyroOffsets(true);
+}
+
+void loop() {
+  mpu6050.update();
+
+  if(millis() - timer > 1000){
+    
+    Serial.println("=======================================================");
+    Serial.print("temp : ");Serial.println(mpu6050.getTemp());
+    Serial.print("accX : ");Serial.print(mpu6050.getAccX());
+    Serial.print("\taccY : ");Serial.print(mpu6050.getAccY());
+    Serial.print("\taccZ : ");Serial.println(mpu6050.getAccZ());
+  
+    Serial.print("V en X : ");Serial.print(mpu6050.getV_X());
+    Serial.print("\tV en Y : ");Serial.print(mpu6050.getV_Y());
+    Serial.print("\t V en Z : ");Serial.println(mpu6050.getV_Z());
+
+    Serial.print("P en X : ");Serial.print(mpu6050.getP_X());
+    Serial.print("\tP en Y : ");Serial.print(mpu6050.getP_Y());
+    Serial.print("\t P en Z : ");Serial.println(mpu6050.getP_Z());
+
+  
+    Serial.print("gyroAngleX : ");Serial.print(mpu6050.getGyroAngleX());
+    Serial.print("\tgyroAngleY : ");Serial.print(mpu6050.getGyroAngleY());
+    Serial.print("\tgyroAngleZ : ");Serial.println(mpu6050.getGyroAngleZ());
+    
+    Serial.println("=======================================================\n");
+    timer = millis();
+  }
+}
